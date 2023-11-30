@@ -1,6 +1,8 @@
 # MClimate Vicki HomeAssistant connector
 Connect the Lora Vicki radiator thermostat to HomeAssistant through Node-Red and Mqtt
 
+https://mclimate.eu/products/vicki-lorawan
+
 ![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/70695931-71f3-4a5d-b74a-866ecc64c171)
 
 To achieve the integration from the MClimate Vicki radiator themostat you need to have access and signal covarage from a Lora Wan server, a Node Red instance, a mqtt broker and the mqtt integration in Home Assistant to conennect the lora device to Home Assistant. Hereby you can receive updates from the sensors and actuators but also control actuators through Home Assistant manually and with automations. The developed solution is done with TTN (The Things Network) but could be changed to an other Lora servers with small adjustment.
