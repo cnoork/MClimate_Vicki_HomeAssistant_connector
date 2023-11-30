@@ -17,6 +17,6 @@ When creating this solution there was not yet an encoder for downlinks available
 
 ![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/978a7f0b-72a0-494a-a759-2f87e1e2a51f)
 
-For the connection to TTN with mqtt I use "mqtts://eu1.cloud.thethings.network" as address and for user "\<your application name\>@ttn" and password a generated API key.
+For connection with TTN mqtt I use "mqtts://eu1.cloud.thethings.network" as address and for user "\<your application name\>@ttn" and the password is a generated API key from TTN.
 
 ![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/d11eefb5-414a-40cb-b67c-4cd35b47f823)
