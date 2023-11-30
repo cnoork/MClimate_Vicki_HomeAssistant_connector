@@ -1,7 +1,7 @@
 # MClimate_Vicki_HomeAssistant_connector
 Connect the Lora Vicki radiator thermostat to HomeAssistant through Node-Red and Mqtt
 
-![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/634cc4e0-093e-4767-bdb5-5998e850de7c)
+![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/70695931-71f3-4a5d-b74a-866ecc64c171)
 
 ![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/0595ca10-368e-4bcf-9063-79ce06c05fd7)
 
