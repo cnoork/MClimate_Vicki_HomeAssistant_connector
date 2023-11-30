@@ -11,4 +11,4 @@ To achieve the integration from the MClimate Vicki radiator themostat you need t
 
 ![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/978a7f0b-72a0-494a-a759-2f87e1e2a51f)
 
-![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/87ec0fea-2d52-46fc-b02f-e7f35a6714b6)
+![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/cf88deae-c716-48f9-82bf-d8c853aba88d)
