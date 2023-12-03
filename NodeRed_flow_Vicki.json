@@ -1,1 +1,863 @@
-[{"id":"487d42b63856018f","type":"group","z":"ec12d4fa86b9e679","name":"Connector for MClimate Vicki (TRV over LoRa) and HomeAssistant through MQTT","style":{"label":true},"nodes":["a3a5d958695557cb","8037b07fe3d6c2d7","935344a97c02aae1","7ad05cd8720d4f01","eb1bd867e7aa109d","b04dd061dd175e07","2632d812c108afe4","e338b080ceb54d0a","de03bc4c13ae7328","2ed81ea2df9727f4","1814cec3dccf9f98","a185dfaaa705cbb3","a66238bc57f61ab0","4c9aece75542d2ad","56f3ee35cfdcef12","5c2f7e73b4acbd69","967beb3b650f635b","02e6c9bd365435cc","5c943d1391bad6ab","65b350adea1ade0f","c413a6b88a7bba89","ac23c770cd87dcbe","989b53d7e5b50516","1cbc0901a01a5bdb","12a689831b07466d","abdc88dbe21bd760","b47fac0e411bde12","4eab435e498049da","2cdd4dbd3ee72448","378b8d22db75c001","8f532cb98a569317"],"x":134,"y":99,"w":1332,"h":1002},{"id":"a3a5d958695557cb","type":"mqtt in","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"","topic":"v3/+/devices/+/up/#","qos":"2","datatype":"auto-detect","broker":"84e0b16.466435","nl":false,"rap":true,"rh":0,"inputs":0,"x":250,"y":240,"wires":[["8037b07fe3d6c2d7"]]},{"id":"8037b07fe3d6c2d7","type":"function","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"Merge Lora data with prefious data","func":"// load general settings\nmsg.settings = flow.get('vicki_settings')\n\n// temporarly working object\nmsg.temp = {\n    topicsLora: {}\n};\n\n// split topics in arrays\nfor (let topicLora in msg.settings.topicsLora) {\n    msg.temp.topicsLora[topicLora] = msg.settings.topicsLora[topicLora].split('/')\n}\n\n// create result object if not excist\nif (!msg.result) { msg.result = {} }                            \n\nmsg.result.timestamp = new Date().getTime()\n\n// get deviceName and if not excist exit function without any action\nmsg.temp.deviceName = msg.payload\nfor (let i in msg.temp.topicsLora.deviceName) {\n    if (msg.temp.deviceName[msg.temp.topicsLora.deviceName[i]]) {\n        msg.temp.deviceName = msg.temp.deviceName[msg.temp.topicsLora.deviceName[i]]\n    }\n}\nif (typeof(msg.temp.deviceName) == 'string') {\n    msg.result.deviceName = msg.temp.deviceName\n    msg.settings.topicHomeassistantDeviceGet = msg.settings.topicHomeassistantDeviceStatus + '/vicki/' + msg.result.deviceName + '/get'\n    msg.settings.topicHomeassistantDeviceSet = msg.settings.topicHomeassistantDeviceStatus + '/vicki/' + msg.result.deviceName + '/set'\n} else {\n    msg.reason = 'deviceName not found or not a string'\n    return([msg, null, null])                               // when no device name could be found do nothing, only debug output\n}\nmsg.result.loraTopic = msg.topic.substring(0, msg.topic.indexOf(msg.result.deviceName) + msg.result.deviceName.length)\n\n// get prefious result from memory if excist\nmsg.result.prefiousData = flow.get('loraPayload_' + msg.result.deviceName) || {}\n\n// if deviceUpdate not excist create with value zero\nif (!msg.result.prefiousData.deviceUpdate) {                       \n    msg.result.prefiousData.deviceUpdate = 0\n}\n\n// collect all sensorData from lora message\nmsg.temp.sensorData = msg.payload\nfor (let key in msg.temp.topicsLora.sensorData) {\n    if (msg.temp.sensorData[msg.temp.topicsLora.sensorData[key]]) {\n        msg.temp.sensorData = msg.temp.sensorData[msg.temp.topicsLora.sensorData[key]]\n    }\n}\n\n// if object excist in sensorData convert it to an string variable\nmsg.result.sensorData = {}\nfor (let key in msg.temp.sensorData) {\n    if (typeof(msg.temp.sensorData[key]) == 'object') {\n        for (let keyObject in msg.temp.sensorData[key]) {\n            let keyNew = keyObject[0].toUpperCase() + keyObject.slice(1);\n            msg.result.sensorData[key + keyNew] = msg.temp.sensorData[key][keyObject]\n        }\n    } else {\n        msg.result.sensorData[key] = msg.temp.sensorData[key]\n    }\n}\n\n// round temperature and humidty\nif (msg.result.sensorData.relativeHumidity) { msg.result.sensorData.relativeHumidity = Math.round(msg.result.sensorData.relativeHumidity) }\nif (msg.result.sensorData.sensorTemperature) { msg.result.sensorData.sensorTemperature = Math.round(msg.result.sensorData.sensorTemperature * 10) / 10 }\n\n// calculate battery status in %\nif (msg.result.sensorData.batteryVoltage) {\n\tmsg.result.sensorData.battery = Math.round(100 * (msg.result.sensorData.batteryVoltage - msg.settings.batteryLow) / (msg.settings.batteryFull - msg.settings.batteryLow))\n\tif (msg.result.sensorData.battery > 100) {\n\t\tmsg.result.sensorData.battery = 100\n\t} else if (msg.result.sensorData.battery < 1) {\n\t\tmsg.result.sensorData.battery = 1\n\t}\n}\n\n// calculate valve status in %\nif (msg.result.sensorData.attachedBackplate == true) {\n    if (msg.result.sensorData.motorPosition || msg.result.sensorData.motorPosition != 0) {\n        msg.result.sensorData.valve_pct = Math.ceil(100 * ((msg.result.sensorData.motorRange - msg.result.sensorData.motorPosition) / msg.result.sensorData.motorRange))\n    } else {\n        msg.result.sensorData.valve_pct = 100\n    }\n} else {\n    msg.result.sensorData.valve_pct = 100\n}\n\n// define operational mode\nif (msg.result.sensorData.attachedBackplate) {\n    msg.result.sensorData.system_mode = 'heat'\n} else {\n    msg.result.sensorData.system_mode = 'off'\n}\n\n// get best rssi value from all gateways\nmsg.temp.gatewayData = msg.payload\nfor (let key in msg.temp.topicsLora.gatewayData) {               // collect all gateways\n    if (msg.temp.gatewayData[msg.temp.topicsLora.gatewayData[key]]) {\n        msg.temp.gatewayData = msg.temp.gatewayData[msg.temp.topicsLora.gatewayData[key]]\n    }\n}\nfor (let i in msg.temp.gatewayData) {                        // get the highest rssi the data is received\n    for (let key in msg.temp.gatewayData[i]) {\n        if (key.toLowerCase().includes(\"rssi\")) {\n            if (!msg.temp.rssi) {\n                msg.temp.rssi = msg.temp.gatewayData[i][key]\n            } else if (msg.temp.gatewayData[i][key] > msg.result.rssi) {\n                msg.temp.rssi = msg.temp.gatewayData[i][key]\n            }\n        }\n    }\n}\nif (msg.temp.rssi) {\n    msg.result.metadata = {\n        rssi: msg.temp.rssi\n    }\n}\n\n// define object for latest status all data\nmsg.result.newData = {\n    deviceUpdate: msg.result.prefiousData.deviceUpdate,\n    sensorData: {},\n    metaData: {}\n}\n\nif(msg.result.prefiousData.downlink) {\n    msg.result.newData.downlink = msg.result.prefiousData.downlink\n}\n\n// load newData with the prefiousData\nfor (let key in msg.result.prefiousData.sensorData) {\n    msg.result.newData.sensorData[key] = msg.result.prefiousData.sensorData[key]\n}\n\n// add or update newData with last values\nfor (let key in msg.result.sensorData) {\n    msg.result.newData.sensorData[key] = msg.result.sensorData[key]\n}\n\n// meta data is alway only the last one\nif (msg.result.metadata) {\n    msg.result.newData.metaData = msg.result.metadata\n}\n\nmsg.result.newData.loraTopic = msg.result.loraTopic\n\nflow.set('loraPayload_' + msg.result.deviceName, msg.result.newData)\n\nmsg.sensorData = {}\nfor (let key in msg.result.newData.sensorData) {\n    if (typeof (msg.result.newData.sensorData[key]) !== 'object') {\n        msg.sensorData[key] = msg.result.newData.sensorData[key]\n    }\n}\n\nmsg.metaData = {}\nfor (let key in msg.result.newData.metaData) {\n    if (typeof (msg.result.newData.metaData[key]) !== 'object') {\n        msg.metaData[key] = msg.result.newData.metaData[key]\n    }\n}\n\nvar msgDeviceData = {\n    settings: msg.settings,\n    result: msg.result,\n    sensorData: msg.sensorData,\n    metaData: msg.metaData,\n}\n\n// send to deviceUpdate and sensorData when beyond the time window\nif (msg.result.timestamp > msg.result.newData.deviceUpdate + msg.settings.deviceUpdateWindow * 60000) {\n    msg.reason = 'update device & sensorData'\n    return ([msg, msgDeviceData, msgDeviceData]);\n}\n\n// send only to sensorData when beyond the time window\nif (msg.result.sensorData.targetTemperature) {\n    msg.reason = 'update sensorData'\n    return ([msg, null, msgDeviceData]);\n}\n\nmsg.return = 'no update possible'\nreturn ([msg, null, null]);\n","outputs":3,"timeout":0,"noerr":0,"initialize":"","finalize":"","libs":[],"x":600,"y":240,"wires":[["935344a97c02aae1"],["7ad05cd8720d4f01","b04dd061dd175e07"],["eb1bd867e7aa109d","2632d812c108afe4"]],"outputLabels":["debug","device update","sensorData update"]},{"id":"935344a97c02aae1","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 69","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":220,"wires":[]},{"id":"7ad05cd8720d4f01","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 70","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":260,"wires":[]},{"id":"eb1bd867e7aa109d","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 71","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":500,"wires":[]},{"id":"b04dd061dd175e07","type":"function","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"Update HA device config","func":"//update the timestamp\nmsg.result.newData.deviceUpdate = msg.result.timestamp\nflow.set('loraPayload_' + msg.result.deviceName, msg.result.newData)\n\n// set min and max temperature when this is not available\nif(!msg.sensorData.temperatureRangeSettingsMax) {\n  msg.sensorData.temperatureRangeSettingsMax = 30                     //default value MClimate\n}\nif(!msg.sensorData.temperatureRangeSettingsMin) {\n  msg.sensorData.temperatureRangeSettingsMin = 5                      //default value MClimate\n}\n\n// repeated information for all type of sensors for th device\nmsg.device = {\n  identifiers: [msg.settings.topicHomeassistantDeviceStatus + '_' + msg.result.deviceName],\n  manufacturer: msg.settings.manufacturer,\n  model: msg.settings.model,\n  name: msg.result.deviceName\n}\nif(msg.sensorData.deviceVersionsSoftware){msg.device.sw_version = msg.sensorData.deviceVersionsSoftware}\nif(msg.sensorData.deviceVersionsHardware){msg.device.hw_version = msg.sensorData.deviceVersionsHardware}\n\n// make an array for all sensors\nmsg.homeassistant = []\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/climate/' + msg.result.deviceName + '/trv_climate/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_trv_climate',\n    unique_id: msg.result.deviceName + '_trv_climate_' + msg.settings.topicHomeassistantDeviceStatus + '',\n    device_class: 'temperature',\n    name: 'Radiator thermostat',\n    modes: ['off', 'heat'],\n    max_temp: msg.sensorData.temperatureRangeSettingsMax,\n    min_temp: msg.sensorData.temperatureRangeSettingsMin,\n    temperature_unit: 'C',\n    temp_step: 1,\n\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    \n    mode_state_topic: msg.settings.topicHomeassistantDeviceGet,\n    mode_state_template: '{{ value_json.system_mode  if value_json.system_mode==\"off\" else \"heat\"}}',\n    \n    //action_topic: msg.settings.topicHomeassistantDeviceGet,\n    //action_template: '{% set values = {\"heat\":\"heating\"} %}{{ values[value_json.running_state] }}',\n    \n    current_temperature_topic: msg.settings.topicHomeassistantDeviceGet,\n    current_temperature_template: '{{ value_json.sensorTemperature }}',\n    \n    temperature_state_topic: msg.settings.topicHomeassistantDeviceGet,\n    temperature_state_template: '{{ value_json.targetTemperature }}',\n\n    temperature_command_topic: msg.settings.topicHomeassistantDeviceSet + '/targetTemperature',\n    mode_command_topic: msg.settings.topicHomeassistantDeviceSet + '/system_mode',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/number/' + msg.result.deviceName + '/trv_number/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_trv_number',\n    unique_id: msg.result.deviceName + '_trv_number_' + msg.settings.topicHomeassistantDeviceStatus + '',\n    device_class: 'temperature',\n    name: 'Target temperature',\n    max: msg.sensorData.temperatureRangeSettingsMax,\n    min: msg.sensorData.temperatureRangeSettingsMin,\n    unit_of_measurement: '°C',\n    step: 1,\n    mode: 'slider',\n    \n//    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n//    json_attributes_template: '{{ value_json.targetTemperature }}',\n\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.targetTemperature }}',\n\n    command_topic: msg.settings.topicHomeassistantDeviceSet + '/targetTemperature',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/sensor/' + msg.result.deviceName + '/battery/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_battery',\n    unique_id: msg.result.deviceName + '_battery_' + msg.settings.topicHomeassistantDeviceStatus + '',\n    enabled_by_default: true,\n    state_class: 'measurement',\n    device_class: 'battery',\n    entity_category: 'diagnostic',\n    unit_of_measurement: '%',\n\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.battery }}'\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/sensor/' + msg.result.deviceName + '/rssi/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_rssi',\n    unique_id: msg.result.deviceName + '_rssi_' + msg.settings.topicHomeassistantDeviceStatus + '',\n    enabled_by_default: false,\n    state_class: 'measurement',\n    device_class: 'signal_strength',\n    entity_category: 'diagnostic',\n\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.rssi }}',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/sensor/' + msg.result.deviceName + '/valve_pct/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_valve_pct',\n    unique_id: msg.result.deviceName + '_valve_pct_' + msg.settings.topicHomeassistantDeviceStatus + '',\n    name: 'Valve open status',\n    unit_of_measurement: '%',\n    icon: 'mdi:pipe-valve',\n\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.valve_pct }}',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/sensor/' + msg.result.deviceName + '/humidty/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_humidity',\n    unique_id: msg.result.deviceName + '_humidity_' + msg.settings.topicHomeassistantDeviceStatus + '',\n//    name: 'humidity',\n    device_class: 'humidity',\n    unit_of_measurement: '%',\n\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.relativeHumidity }}',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/binary_sensor/' + msg.result.deviceName + '/attachedBackplate/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_attachedBackplate_',\n    unique_id: msg.result.deviceName + '_attachedBackplate_' + msg.settings.topicHomeassistantDeviceStatus,\n    name: 'Attached backplate',\n    device_class: 'connectivity',\n    payload_off: false,\n    payload_on: true,\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.attachedBackplate }}',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/binary_sensor/' + msg.result.deviceName + '/childLock/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_childLock',\n    unique_id: msg.result.deviceName + '_childLock_' + msg.settings.topicHomeassistantDeviceStatus,\n    name: 'Child lock',\n//    device_class: 'lock',\n    icon: 'mdi:lock',\n    payload_off: false,\n    payload_on: true,\n    payload_available: 'on',\n    payload_not_available: 'off',\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.childLock }}',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/binary_sensor/' + msg.result.deviceName + '/openWindow/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_openWindow',\n    unique_id: msg.result.deviceName + '_openWindow_' + msg.settings.topicHomeassistantDeviceStatus,\n    name: 'Open window detection',\n    icon: 'mdi:window-closed-variant',\n    payload_off: false,\n    payload_on: true,\n    payload_available: 'on',\n    payload_not_available: 'off',\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.openWindow }}',\n  }\n})\n\n// send all sensors one by one to the mqtt broker\nfor (let i = 0; i < msg.homeassistant.length; i++) {\n  let msgMqtt = {\n    topic: msg.homeassistant[i].topic,\n    payload: msg.homeassistant[i].payload\n  }\n\n  node.send([null, msgMqtt]);\n}\n\nreturn [msg, null];\n","outputs":2,"timeout":0,"noerr":0,"initialize":"","finalize":"","libs":[],"x":1010,"y":300,"wires":[["de03bc4c13ae7328"],["1814cec3dccf9f98","a185dfaaa705cbb3"]],"outputLabels":["debug","mqqt2homeassistant"]},{"id":"2632d812c108afe4","type":"delay","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"","pauseType":"delay","timeout":"1","timeoutUnits":"seconds","rate":"1","nbRateUnits":"1","rateUnits":"second","randomFirst":"1","randomLast":"5","randomUnits":"seconds","drop":false,"allowrate":false,"outputs":1,"x":520,"y":540,"wires":[["e338b080ceb54d0a"]]},{"id":"e338b080ceb54d0a","type":"function","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"Update HA sensorData","func":"// mqtt message to update sensorData\nvar msgOut = {\n\ttopic: msg.settings.topicHomeassistantDeviceGet,\n    payload: {\n\t  \tdevice: {\n\t  \t\tfriendlyName: msg.result.deviceName,\n\t  \t\tieeeAddr: msg.result.deviceName,\n\t\t  \tmanufacturerName: msg.settings.manufacturer,\n\t\t  \tmodel: msg.settings.model,\n\t  \t\tpowerSource: 'Battery',\n\t  \t}\n\t}\n}\n\n// add all sensorData\nfor(let key in msg.sensorData) {\n\tmsgOut.payload[key] = msg.sensorData[key]\n}\n\n// add all metaData\nfor(let key in msg.metaData) {\n\tmsgOut.payload[key] = msg.sensorData[key]\n}\n\nreturn [msg, msgOut];","outputs":2,"timeout":0,"noerr":0,"initialize":"","finalize":"","libs":[],"x":1000,"y":540,"wires":[["2ed81ea2df9727f4"],["a66238bc57f61ab0","a185dfaaa705cbb3"]],"outputLabels":["debug","out"]},{"id":"de03bc4c13ae7328","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 72","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":300,"wires":[]},{"id":"2ed81ea2df9727f4","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 73","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":540,"wires":[]},{"id":"1814cec3dccf9f98","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 74","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":340,"wires":[]},{"id":"a185dfaaa705cbb3","type":"mqtt out","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"snoek923/mosquittoDev","topic":"","qos":"","retain":"","respTopic":"","contentType":"","userProps":"","correl":"","expiry":"","broker":"e0a907a349b19b14","x":1330,"y":420,"wires":[]},{"id":"a66238bc57f61ab0","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 75","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":580,"wires":[]},{"id":"4c9aece75542d2ad","type":"mqtt in","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"","topic":"lora2nodered2mqtt/vicki/+/set/#","qos":"2","datatype":"auto-detect","broker":"e0a907a349b19b14","nl":false,"rap":true,"rh":0,"inputs":0,"x":290,"y":720,"wires":[["56f3ee35cfdcef12"]]},{"id":"56f3ee35cfdcef12","type":"function","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"get command from Home Assistant","func":"// load general settings\nmsg.settings = flow.get('vicki_settings')\n\n \n\nmsg.temp = {\n    topicArray: msg.topic.split(\"/\")\n}\n\nmsg.result = {\n    deviceName: msg.temp.topicArray[2],\n    variable: msg.temp.topicArray[4],\n    value: msg.payload,\n    timestamp: new Date().getTime(),\n}\n\nmsg.result.commandSet = 'set' + msg.result.variable[0].toUpperCase() + msg.result.variable.slice(1)\nmsg.result.topicHomeassistantDeviceGe = msg.settings.topicHomeassistantDeviceStatus + '/vicki/' + msg.result.deviceName + '/get'\nmsg.result.topicHomeassistantDeviceSet = msg.settings.topicHomeassistantDeviceStatus + '/vicki/' + msg.result.deviceName + '/set'\nmsg.result.prefiousData = flow.get('loraPayload_' + msg.result.deviceName) || { timestamp: 0 }\n\nif (msg.result.prefiousData.timestamp < msg.settings.timestamp - msg.settings.timeWindow) {\n    msg.result.prefiousData.timestamp = msg.settings.timestamp\n    var msgLora = {\n        settings: msg.settings,\n        result: msg.result,\n        delay: msg.settings.timeWindow * 1000\n    }\n    node.send([null, null, msgLora])\n}\n\n\n// define object for latest status all data\nmsg.result.newData = {\n    deviceUpdate: msg.result.prefiousData.deviceUpdate,\n    sensorData: {},\n    metaData: {},\n    loraTopic: msg.result.prefiousData.loraTopic\n}\n\n// load newData with the prefiousData\nfor (let key in msg.result.prefiousData.sensorData) {\n    msg.result.newData.sensorData[key] = msg.result.prefiousData.sensorData[key]\n}\n\n// update newData with last values\nmsg.result.newData.sensorData[msg.result.variable] = msg.result.value\n\n// load metaData, nothing changed and therebey keep the prefious\nmsg.result.newData.metaData = msg.result.prefiousData.metaData\n\nmsg.result.newData.downlink = {\n    commandSet: msg.result.commandSet,\n    variable: msg.result.variable,\n    timestamp: msg.result.timestamp\n}\n//if (!msg.result.newData.downlink.timestamp) {\n//    msg.result.newData.downlink.timestamp = msg.result.timestamp\n//}\n\nflow.set('loraPayload_' + msg.result.deviceName, msg.result.newData)\n\nmsg.sensorData = {}\nfor (let key in msg.result.newData.sensorData) {\n    if (typeof (msg.result.newData.sensorData[key]) !== 'object') {\n        msg.sensorData[key] = msg.result.newData.sensorData[key]\n    }\n}\n\nmsg.metaData = {}\nfor (let key in msg.result.newData.metaData) {\n    if (typeof (msg.result.newData.metaData[key]) !== 'object') {\n        msg.metaData[key] = msg.result.newData.metaData[key]\n    }\n}\n\nvar msgDeviceData = {\n    settings: msg.settings,\n    result: msg.result,\n    sensorData: msg.sensorData,\n    metaData: msg.metaData,\n}\n\nreturn [msg, msgDeviceData, msgDeviceData];","outputs":3,"timeout":0,"noerr":0,"initialize":"","finalize":"","libs":[],"x":600,"y":720,"wires":[["5c2f7e73b4acbd69"],["967beb3b650f635b","e338b080ceb54d0a"],["989b53d7e5b50516","02e6c9bd365435cc"]],"outputLabels":["debug","homeassistant","lora"]},{"id":"5c2f7e73b4acbd69","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 76","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":700,"wires":[]},{"id":"967beb3b650f635b","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 78","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":740,"wires":[]},{"id":"02e6c9bd365435cc","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 79","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":780,"wires":[]},{"id":"5c943d1391bad6ab","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 77","active":true,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":820,"wires":[]},{"id":"65b350adea1ade0f","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 81","active":true,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":860,"wires":[]},{"id":"c413a6b88a7bba89","type":"function","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"Send lora downlink","func":"//msg.memory = flow.get('deviceConfig_' + msg.result.deviceName)\n//msg.loraPayload = flow.get('loraPayload_' + msg.result.deviceName)\n\n//msgLora.topic = settings.topicLora0 + '/' + applicationId + '/' + settings.topicLora0 '/' + deviceName + '/down/push'\n\n\nmsg.result.prefiousData = flow.get('loraPayload_' + msg.result.deviceName) || {}\n\n\n\nif (msg.result.prefiousData.downlink.timestamp == msg.result.timestamp && msg.result.value != msg.result.prefiousData.sensorData[msg.result.variable]) {\n    var msgLora = {\n        topic: msg.result.newData.loraTopic + '/down/push',\n        payload: {\n            downlinks: [\n                {\n                    f_port: 1,\n                    decoded_payload: {[msg.result.commandSet]: msg.result.value},\n                    priority: \"NORMAL\",\n                    confirmed: false\n                }\n            ]\n        }\n    }\n    return [msg, msgLora];\n}\n\nreturn [msg, null];","outputs":2,"timeout":0,"noerr":0,"initialize":"","finalize":"","libs":[],"x":990,"y":820,"wires":[["5c943d1391bad6ab"],["65b350adea1ade0f","ac23c770cd87dcbe"]],"outputLabels":["debug","out"]},{"id":"ac23c770cd87dcbe","type":"mqtt out","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"TTN ha-thermostaat","topic":"","qos":"","retain":"","respTopic":"","contentType":"","userProps":"","correl":"","expiry":"","broker":"84e0b16.466435","x":1320,"y":940,"wires":[]},{"id":"989b53d7e5b50516","type":"delay","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"delay 5s","pauseType":"delayv","timeout":"5","timeoutUnits":"seconds","rate":"1","nbRateUnits":"1","rateUnits":"second","randomFirst":"1","randomLast":"5","randomUnits":"seconds","drop":false,"allowrate":false,"outputs":1,"x":520,"y":820,"wires":[["c413a6b88a7bba89"]]},{"id":"1cbc0901a01a5bdb","type":"inject","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"","props":[{"p":"payload"},{"p":"topic","vt":"str"}],"repeat":"","crontab":"","once":true,"onceDelay":0.1,"topic":"","payload":"","payloadType":"date","x":250,"y":140,"wires":[["12a689831b07466d"]]},{"id":"12a689831b07466d","type":"function","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"\"vicki_settings\" to flow variable","func":"// general settings\n// topic names which could be different per Lora server\nmsg.settings = {\n    manufacturer: 'MClimate',\n    model: 'Vicki - LoRaWAN Smart Radiator Thermostat',\n    topicHomeassistantDeviceStatus: 'lora2nodered2mqtt',\n    topicHomeassistant: 'homeassistant',\n    topicsLora: {\n        deviceName: 'end_device_ids/device_id',             // TTN & TTI\n        sensorData: 'uplink_message/decoded_payload',       // TTN & TTI\n        gatewayData: 'uplink_message/rx_metadata'           // TTN & TTI\n    },\n//    deviceUpdateWindow: 1400,      // in minutes to update device in HA\n//    deviceUpdateWindow: 10,      // in minutes\n    deviceUpdateWindow: 1,      // in minutes\n    batteryFull: 1.7 * 2,\n\tbatteryLow: 1.3 * 2\n}\n\nflow.set('vicki_settings', msg.settings)\n\nreturn msg;","outputs":1,"timeout":0,"noerr":0,"initialize":"","finalize":"","libs":[],"x":590,"y":140,"wires":[["abdc88dbe21bd760"]]},{"id":"abdc88dbe21bd760","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 87","active":false,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":140,"wires":[]},{"id":"b47fac0e411bde12","type":"function","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"manual request Vicki version and temperature range","func":"// one or more deviceNames where the software and temperature range needs to be requested\n//msg.deviceNameList = ['device_1', 'device_2', 'device_X']     \n\nmsg.deviceNameList = ['eui-70b3d52dd3015cd5', 'eui-70b3d52dd3015c93']\n\nfor (let i in msg.deviceNameList) {\n    let deviceName = msg.deviceNameList[i]\n    var msgLora = {\n        topic: 'v3/ha-thermostaat@ttn/devices/' + deviceName + '/down/push',\n        payload: {\n            downlinks: [\n                {\n                    f_port: 1,\n                    decoded_payload: { getDeviceVersions: '', getTemperatureRange: '' },\n                    priority: \"NORMAL\",\n                    confirmed: false\n                }\n            ]\n        }\n    }\n    node.send([null, msgLora]);\n}\n\nreturn [msg, null];","outputs":2,"timeout":0,"noerr":0,"initialize":"","finalize":"","libs":[],"x":660,"y":1040,"wires":[["4eab435e498049da"],["378b8d22db75c001","ac23c770cd87dcbe"]]},{"id":"4eab435e498049da","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 88","active":true,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":1020,"wires":[]},{"id":"2cdd4dbd3ee72448","type":"inject","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"","props":[{"p":"payload"},{"p":"topic","vt":"str"}],"repeat":"","crontab":"","once":false,"onceDelay":0.1,"topic":"","payload":"","payloadType":"date","x":240,"y":1040,"wires":[["b47fac0e411bde12"]]},{"id":"378b8d22db75c001","type":"debug","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"debug 89","active":true,"tosidebar":true,"console":false,"tostatus":false,"complete":"true","targetType":"full","statusVal":"","statusType":"auto","x":1280,"y":1060,"wires":[]},{"id":"8f532cb98a569317","type":"comment","z":"ec12d4fa86b9e679","g":"487d42b63856018f","name":"Don't use it to often because there is a limit/fair-use-policy for downlinks with public Lora servers","info":"Also uplinks should no bet setmore frequently then every 4 minutes, better to use 10 or 15 minutes","x":490,"y":1000,"wires":[]},{"id":"84e0b16.466435","type":"mqtt-broker","name":"TTN ha-thermostaat","broker":"eu1.cloud.thethings.network","port":"1883","clientid":"","autoConnect":true,"usetls":false,"compatmode":false,"protocolVersion":"4","keepalive":"60","cleansession":true,"autoUnsubscribe":true,"birthTopic":"","birthQos":"0","birthPayload":"","birthMsg":{},"closeTopic":"","closeQos":"0","closePayload":"","closeMsg":{},"willTopic":"","willQos":"0","willPayload":"","willMsg":{},"userProps":"","sessionExpiry":""},{"id":"e0a907a349b19b14","type":"mqtt-broker","name":"snoek923/mosquittoDev","broker":"snoek923.noork.nl","port":"6043","clientid":"","autoConnect":true,"usetls":false,"protocolVersion":"4","keepalive":"60","cleansession":true,"autoUnsubscribe":true,"birthTopic":"","birthQos":"0","birthRetain":"false","birthPayload":"","birthMsg":{},"closeTopic":"","closeQos":"0","closeRetain":"false","closePayload":"","closeMsg":{},"willTopic":"","willQos":"0","willRetain":"false","willPayload":"","willMsg":{},"userProps":"","sessionExpiry":""}]
+[
+    {
+        "id": "487d42b63856018f",
+        "type": "group",
+        "z": "ec12d4fa86b9e679",
+        "name": "Connector for MClimate Vicki (TRV over LoRa) and HomeAssistant through MQTT",
+        "style": {
+            "label": true
+        },
+        "nodes": [
+            "a3a5d958695557cb",
+            "8037b07fe3d6c2d7",
+            "935344a97c02aae1",
+            "7ad05cd8720d4f01",
+            "eb1bd867e7aa109d",
+            "b04dd061dd175e07",
+            "2632d812c108afe4",
+            "e338b080ceb54d0a",
+            "de03bc4c13ae7328",
+            "2ed81ea2df9727f4",
+            "1814cec3dccf9f98",
+            "a185dfaaa705cbb3",
+            "a66238bc57f61ab0",
+            "4c9aece75542d2ad",
+            "56f3ee35cfdcef12",
+            "5c2f7e73b4acbd69",
+            "967beb3b650f635b",
+            "02e6c9bd365435cc",
+            "5c943d1391bad6ab",
+            "65b350adea1ade0f",
+            "c413a6b88a7bba89",
+            "ac23c770cd87dcbe",
+            "989b53d7e5b50516",
+            "1cbc0901a01a5bdb",
+            "12a689831b07466d",
+            "abdc88dbe21bd760",
+            "b47fac0e411bde12",
+            "4eab435e498049da",
+            "2cdd4dbd3ee72448",
+            "378b8d22db75c001",
+            "8f532cb98a569317",
+            "b2eddbc63f783015",
+            "756bf830d251a323",
+            "f84938f7173f097c",
+            "8dbab41c935b0477",
+            "2d97f37284085cb4"
+        ],
+        "x": 134,
+        "y": 99,
+        "w": 1332,
+        "h": 1082
+    },
+    {
+        "id": "a3a5d958695557cb",
+        "type": "mqtt in",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "",
+        "topic": "v3/+/devices/+/up/#",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "84e0b16.466435",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 250,
+        "y": 240,
+        "wires": [
+            [
+                "8037b07fe3d6c2d7"
+            ]
+        ]
+    },
+    {
+        "id": "8037b07fe3d6c2d7",
+        "type": "function",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "Merge Lora data with prefious data",
+        "func": "// load general settings\nmsg.settings = flow.get('vicki_settings')\n\n// temporarly working object\nmsg.temp = {\n    topicsLora: {}\n};\n\n// split topics in arrays\nfor (let topicLora in msg.settings.topicsLora) {\n    msg.temp.topicsLora[topicLora] = msg.settings.topicsLora[topicLora].split('/')\n}\n\n// create result object if not excist\nif (!msg.result) { msg.result = {} }                            \n\nmsg.result.timestamp = new Date().getTime()\n\n// get deviceName and if not excist exit function without any action\nmsg.temp.deviceName = msg.payload\nfor (let i in msg.temp.topicsLora.deviceName) {\n    if (msg.temp.deviceName[msg.temp.topicsLora.deviceName[i]]) {\n        msg.temp.deviceName = msg.temp.deviceName[msg.temp.topicsLora.deviceName[i]]\n    }\n}\nif (typeof(msg.temp.deviceName) == 'string') {\n    msg.result.deviceName = msg.temp.deviceName\n    msg.settings.topicHomeassistantDeviceGet = msg.settings.topicHomeassistantDeviceStatus + '/vicki/' + msg.result.deviceName + '/get'\n    msg.settings.topicHomeassistantDeviceSet = msg.settings.topicHomeassistantDeviceStatus + '/vicki/' + msg.result.deviceName + '/set'\n} else {\n    msg.reason = 'deviceName not found or not a string'\n    return([msg, null, null])                               // when no device name could be found do nothing, only debug output\n}\nmsg.result.loraTopic = msg.topic.substring(0, msg.topic.indexOf(msg.result.deviceName) + msg.result.deviceName.length)\n\n// get prefious result from memory if excist\nmsg.result.prefiousData = flow.get('loraPayload_' + msg.result.deviceName) || {}\n\n// if deviceUpdate not excist create with value zero\nif (!msg.result.prefiousData.deviceUpdate) {                       \n    msg.result.prefiousData.deviceUpdate = 0\n}\n\n// collect all sensorData from lora message\nmsg.temp.sensorData = msg.payload\nfor (let key in msg.temp.topicsLora.sensorData) {\n    if (msg.temp.sensorData[msg.temp.topicsLora.sensorData[key]]) {\n        msg.temp.sensorData = msg.temp.sensorData[msg.temp.topicsLora.sensorData[key]]\n    }\n}\n\n// if object excist in sensorData convert it to an string variable\nmsg.result.sensorData = {}\nfor (let key in msg.temp.sensorData) {\n    if (typeof(msg.temp.sensorData[key]) == 'object') {\n        for (let keyObject in msg.temp.sensorData[key]) {\n            let keyNew = keyObject[0].toUpperCase() + keyObject.slice(1);\n            msg.result.sensorData[key + keyNew] = msg.temp.sensorData[key][keyObject]\n        }\n    } else {\n        msg.result.sensorData[key] = msg.temp.sensorData[key]\n    }\n}\n\n// round temperature and humidty\nif (msg.result.sensorData.relativeHumidity) { msg.result.sensorData.relativeHumidity = Math.round(msg.result.sensorData.relativeHumidity) }\nif (msg.result.sensorData.sensorTemperature) { msg.result.sensorData.sensorTemperature = Math.round(msg.result.sensorData.sensorTemperature * 10) / 10 }\n\n// calculate battery status in %\nif (msg.result.sensorData.batteryVoltage) {\n\tmsg.result.sensorData.battery = Math.round(100 * (msg.result.sensorData.batteryVoltage - msg.settings.batteryLow) / (msg.settings.batteryFull - msg.settings.batteryLow))\n\tif (msg.result.sensorData.battery > 100) {\n\t\tmsg.result.sensorData.battery = 100\n\t} else if (msg.result.sensorData.battery < 1) {\n\t\tmsg.result.sensorData.battery = 1\n\t}\n}\n\n// calculate valve status in %\nif (msg.result.sensorData.attachedBackplate == true) {\n    if (msg.result.sensorData.motorPosition || msg.result.sensorData.motorPosition != 0) {\n        msg.result.sensorData.valve_pct = Math.ceil(100 * ((msg.result.sensorData.motorRange - msg.result.sensorData.motorPosition) / msg.result.sensorData.motorRange))\n    } else {\n        msg.result.sensorData.valve_pct = 100\n    }\n} else {\n    msg.result.sensorData.valve_pct = 100\n}\n\n// define operational mode\nif (msg.result.sensorData.attachedBackplate) {\n    msg.result.sensorData.system_mode = 'heat'\n} else {\n    msg.result.sensorData.system_mode = 'off'\n}\n\n// get best rssi value from all gateways\nmsg.temp.gatewayData = msg.payload\nfor (let key in msg.temp.topicsLora.gatewayData) {               // collect all gateways\n    if (msg.temp.gatewayData[msg.temp.topicsLora.gatewayData[key]]) {\n        msg.temp.gatewayData = msg.temp.gatewayData[msg.temp.topicsLora.gatewayData[key]]\n    }\n}\nfor (let i in msg.temp.gatewayData) {                        // get the highest rssi the data is received\n    for (let key in msg.temp.gatewayData[i]) {\n        if (key.toLowerCase().includes(\"rssi\")) {\n            if (!msg.temp.rssi) {\n                msg.temp.rssi = msg.temp.gatewayData[i][key]\n            } else if (msg.temp.gatewayData[i][key] > msg.result.rssi) {\n                msg.temp.rssi = msg.temp.gatewayData[i][key]\n            }\n        }\n    }\n}\nif (msg.temp.rssi) {\n    msg.result.metadata = {\n        rssi: msg.temp.rssi\n    }\n}\n\n// define object for latest status all data\nmsg.result.newData = {\n    deviceUpdate: msg.result.prefiousData.deviceUpdate,\n    sensorData: {},\n    metaData: {}\n}\n\nif(msg.result.prefiousData.downlink) {\n    msg.result.newData.downlink = msg.result.prefiousData.downlink\n}\n\n// load newData with the prefiousData\nfor (let key in msg.result.prefiousData.sensorData) {\n    msg.result.newData.sensorData[key] = msg.result.prefiousData.sensorData[key]\n}\n\n// add or update newData with last values\nfor (let key in msg.result.sensorData) {\n    msg.result.newData.sensorData[key] = msg.result.sensorData[key]\n}\n\n// meta data is alway only the last one\nif (msg.result.metadata) {\n    msg.result.newData.metaData = msg.result.metadata\n}\n\nmsg.result.newData.loraTopic = msg.result.loraTopic\n\nflow.set('loraPayload_' + msg.result.deviceName, msg.result.newData)\n\nmsg.sensorData = {}\nfor (let key in msg.result.newData.sensorData) {\n    if (typeof (msg.result.newData.sensorData[key]) !== 'object') {\n        msg.sensorData[key] = msg.result.newData.sensorData[key]\n    }\n}\n\nmsg.metaData = {}\nfor (let key in msg.result.newData.metaData) {\n    if (typeof (msg.result.newData.metaData[key]) !== 'object') {\n        msg.metaData[key] = msg.result.newData.metaData[key]\n    }\n}\n\nvar msgDeviceData = {\n    settings: msg.settings,\n    result: msg.result,\n    sensorData: msg.sensorData,\n    metaData: msg.metaData,\n}\n\n// send to deviceUpdate and sensorData when beyond the time window\nif (msg.result.timestamp > msg.result.newData.deviceUpdate + msg.settings.deviceUpdateWindow * 60000) {\n    msg.reason = 'update device & sensorData'\n    return ([msg, msgDeviceData, msgDeviceData]);\n}\n\n// send only to sensorData when beyond the time window\nif (msg.result.sensorData.targetTemperature) {\n    msg.reason = 'update sensorData'\n    return ([msg, null, msgDeviceData]);\n}\n\nmsg.return = 'no update possible'\nreturn ([msg, null, null]);\n",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 600,
+        "y": 240,
+        "wires": [
+            [
+                "935344a97c02aae1"
+            ],
+            [
+                "7ad05cd8720d4f01",
+                "b04dd061dd175e07"
+            ],
+            [
+                "eb1bd867e7aa109d",
+                "2632d812c108afe4"
+            ]
+        ],
+        "outputLabels": [
+            "debug",
+            "device update",
+            "sensorData update"
+        ]
+    },
+    {
+        "id": "935344a97c02aae1",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 69",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "7ad05cd8720d4f01",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 70",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "eb1bd867e7aa109d",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 71",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "b04dd061dd175e07",
+        "type": "function",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "Update HA device config",
+        "func": "//update the timestamp\nmsg.result.newData.deviceUpdate = msg.result.timestamp\nflow.set('loraPayload_' + msg.result.deviceName, msg.result.newData)\n\n// set min and max temperature when this is not available\nif(!msg.sensorData.temperatureRangeSettingsMax) {\n  msg.sensorData.temperatureRangeSettingsMax = 30                     //default value MClimate\n}\nif(!msg.sensorData.temperatureRangeSettingsMin) {\n  msg.sensorData.temperatureRangeSettingsMin = 5                      //default value MClimate\n}\n\n// repeated information for all type of sensors for th device\nmsg.device = {\n  identifiers: [msg.settings.topicHomeassistantDeviceStatus + '_' + msg.result.deviceName],\n  manufacturer: msg.settings.manufacturer,\n  model: msg.settings.model,\n  name: msg.result.deviceName\n}\nif(msg.sensorData.deviceVersionsSoftware){msg.device.sw_version = msg.sensorData.deviceVersionsSoftware}\nif(msg.sensorData.deviceVersionsHardware){msg.device.hw_version = msg.sensorData.deviceVersionsHardware}\n\n// make an array for all sensors\nmsg.homeassistant = []\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/climate/' + msg.result.deviceName + '/trv_climate/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_trv_climate',\n    unique_id: msg.result.deviceName + '_trv_climate_' + msg.settings.topicHomeassistantDeviceStatus + '',\n    device_class: 'temperature',\n    name: 'Radiator thermostat',\n    modes: ['off', 'heat'],\n    max_temp: msg.sensorData.temperatureRangeSettingsMax,\n    min_temp: msg.sensorData.temperatureRangeSettingsMin,\n    temperature_unit: 'C',\n    temp_step: 1,\n\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    \n    mode_state_topic: msg.settings.topicHomeassistantDeviceGet,\n    mode_state_template: '{{ value_json.system_mode  if value_json.system_mode==\"off\" else \"heat\"}}',\n    \n    //action_topic: msg.settings.topicHomeassistantDeviceGet,\n    //action_template: '{% set values = {\"heat\":\"heating\"} %}{{ values[value_json.running_state] }}',\n    \n    current_temperature_topic: msg.settings.topicHomeassistantDeviceGet,\n    current_temperature_template: '{{ value_json.sensorTemperature }}',\n    \n    temperature_state_topic: msg.settings.topicHomeassistantDeviceGet,\n    temperature_state_template: '{{ value_json.targetTemperature }}',\n\n    temperature_command_topic: msg.settings.topicHomeassistantDeviceSet + '/targetTemperature',\n    mode_command_topic: msg.settings.topicHomeassistantDeviceSet + '/system_mode',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/number/' + msg.result.deviceName + '/trv_number/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_trv_number',\n    unique_id: msg.result.deviceName + '_trv_number_' + msg.settings.topicHomeassistantDeviceStatus + '',\n    device_class: 'temperature',\n    name: 'Target temperature',\n    max: msg.sensorData.temperatureRangeSettingsMax,\n    min: msg.sensorData.temperatureRangeSettingsMin,\n    unit_of_measurement: '°C',\n    step: 1,\n    mode: 'slider',\n    \n//    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n//    json_attributes_template: '{{ value_json.targetTemperature }}',\n\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.targetTemperature }}',\n\n    command_topic: msg.settings.topicHomeassistantDeviceSet + '/targetTemperature',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/sensor/' + msg.result.deviceName + '/battery/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_battery',\n    unique_id: msg.result.deviceName + '_battery_' + msg.settings.topicHomeassistantDeviceStatus + '',\n    enabled_by_default: true,\n    state_class: 'measurement',\n    device_class: 'battery',\n    entity_category: 'diagnostic',\n    unit_of_measurement: '%',\n\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.battery }}'\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/sensor/' + msg.result.deviceName + '/rssi/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_rssi',\n    unique_id: msg.result.deviceName + '_rssi_' + msg.settings.topicHomeassistantDeviceStatus + '',\n    enabled_by_default: false,\n    state_class: 'measurement',\n    device_class: 'signal_strength',\n    entity_category: 'diagnostic',\n\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.rssi }}',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/sensor/' + msg.result.deviceName + '/valve_pct/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_valve_pct',\n    unique_id: msg.result.deviceName + '_valve_pct_' + msg.settings.topicHomeassistantDeviceStatus + '',\n    name: 'Valve open status',\n    unit_of_measurement: '%',\n    icon: 'mdi:pipe-valve',\n\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.valve_pct }}',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/sensor/' + msg.result.deviceName + '/humidty/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_humidity',\n    unique_id: msg.result.deviceName + '_humidity_' + msg.settings.topicHomeassistantDeviceStatus + '',\n//    name: 'humidity',\n    device_class: 'humidity',\n    unit_of_measurement: '%',\n\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.relativeHumidity }}',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/binary_sensor/' + msg.result.deviceName + '/attachedBackplate/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_attachedBackplate_',\n    unique_id: msg.result.deviceName + '_attachedBackplate_' + msg.settings.topicHomeassistantDeviceStatus,\n    name: 'Attached backplate',\n    device_class: 'connectivity',\n    payload_off: false,\n    payload_on: true,\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.attachedBackplate }}',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/binary_sensor/' + msg.result.deviceName + '/childLock/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_childLock',\n    unique_id: msg.result.deviceName + '_childLock_' + msg.settings.topicHomeassistantDeviceStatus,\n    name: 'Child lock',\n//    device_class: 'lock',\n    icon: 'mdi:lock',\n    payload_off: false,\n    payload_on: true,\n    payload_available: 'on',\n    payload_not_available: 'off',\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.childLock }}',\n  }\n})\n\nmsg.homeassistant.push({\n  topic: msg.settings.topicHomeassistant + '/binary_sensor/' + msg.result.deviceName + '/openWindow/config',\n  payload: {\n    device: msg.device,\n    object_id: msg.result.deviceName + '_openWindow',\n    unique_id: msg.result.deviceName + '_openWindow_' + msg.settings.topicHomeassistantDeviceStatus,\n    name: 'Open window detection',\n    icon: 'mdi:window-closed-variant',\n    payload_off: false,\n    payload_on: true,\n    payload_available: 'on',\n    payload_not_available: 'off',\n    state_topic: msg.settings.topicHomeassistantDeviceGet,\n    json_attributes_topic: msg.settings.topicHomeassistantDeviceGet,\n    value_template: '{{ value_json.openWindow }}',\n  }\n})\n\n// send all sensors one by one to the mqtt broker\nfor (let i = 0; i < msg.homeassistant.length; i++) {\n  let msgMqtt = {\n    topic: msg.homeassistant[i].topic,\n    payload: msg.homeassistant[i].payload\n  }\n\n  node.send([null, msgMqtt]);\n}\n\nreturn [msg, null];\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1010,
+        "y": 300,
+        "wires": [
+            [
+                "de03bc4c13ae7328"
+            ],
+            [
+                "1814cec3dccf9f98",
+                "a185dfaaa705cbb3"
+            ]
+        ],
+        "outputLabels": [
+            "debug",
+            "mqtt2homeassistant"
+        ]
+    },
+    {
+        "id": "2632d812c108afe4",
+        "type": "delay",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "",
+        "pauseType": "delay",
+        "timeout": "1",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 520,
+        "y": 580,
+        "wires": [
+            [
+                "e338b080ceb54d0a"
+            ]
+        ]
+    },
+    {
+        "id": "e338b080ceb54d0a",
+        "type": "function",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "Update HA sensorData",
+        "func": "// mqtt message to update sensorData\nvar msgOut = {\n\ttopic: msg.settings.topicHomeassistantDeviceGet,\n    payload: {\n\t  \tdevice: {\n\t  \t\tfriendlyName: msg.result.deviceName,\n\t  \t\tieeeAddr: msg.result.deviceName,\n\t\t  \tmanufacturerName: msg.settings.manufacturer,\n\t\t  \tmodel: msg.settings.model,\n\t  \t\tpowerSource: 'Battery',\n\t  \t}\n\t}\n}\n\n// add all sensorData\nfor(let key in msg.sensorData) {\n\tmsgOut.payload[key] = msg.sensorData[key]\n}\n\n// add all metaData\nfor(let key in msg.metaData) {\n\tmsgOut.payload[key] = msg.metaData[key]\n}\n\nreturn [msg, msgOut];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1000,
+        "y": 580,
+        "wires": [
+            [
+                "2ed81ea2df9727f4"
+            ],
+            [
+                "a66238bc57f61ab0",
+                "a185dfaaa705cbb3"
+            ]
+        ],
+        "outputLabels": [
+            "debug",
+            "mqtt2homeassistant"
+        ]
+    },
+    {
+        "id": "de03bc4c13ae7328",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 72",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "2ed81ea2df9727f4",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 73",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 580,
+        "wires": []
+    },
+    {
+        "id": "1814cec3dccf9f98",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 74",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "a185dfaaa705cbb3",
+        "type": "mqtt out",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "snoek923/mosquittoDev",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "e0a907a349b19b14",
+        "x": 1330,
+        "y": 460,
+        "wires": []
+    },
+    {
+        "id": "a66238bc57f61ab0",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 75",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 620,
+        "wires": []
+    },
+    {
+        "id": "4c9aece75542d2ad",
+        "type": "mqtt in",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "",
+        "topic": "lora2nodered2mqtt/vicki/+/set/#",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "e0a907a349b19b14",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 290,
+        "y": 760,
+        "wires": [
+            [
+                "56f3ee35cfdcef12"
+            ]
+        ]
+    },
+    {
+        "id": "56f3ee35cfdcef12",
+        "type": "function",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "set command from Home Assistant",
+        "func": "// load general settings\nmsg.settings = flow.get('vicki_settings')\n \n// temporarly working object\nmsg.temp = {\n    topicArray: msg.topic.split(\"/\")\n}\n\n// create result object if not excist\nif (!msg.result) { msg.result = {} }\n\nmsg.result.deviceName = msg.temp.topicArray[2]\nmsg.result.variable = msg.temp.topicArray[4]\nmsg.result.commandSet = 'set' + msg.result.variable[0].toUpperCase() + msg.result.variable.slice(1)\nmsg.result.value = msg.payload\nmsg.result.timestamp = new Date().getTime()\n\nmsg.result.topicHomeassistantDeviceGe = msg.settings.topicHomeassistantDeviceStatus + '/vicki/' + msg.result.deviceName + '/get'\nmsg.result.topicHomeassistantDeviceSet = msg.settings.topicHomeassistantDeviceStatus + '/vicki/' + msg.result.deviceName + '/set'\n\n// get prefious result from memory if excist\nmsg.result.prefiousData = flow.get('loraPayload_' + msg.result.deviceName) || {}\n//msg.result.prefiousData = flow.get('loraPayload_' + msg.result.deviceName) || { timestamp: 0 }\n\n// define object for latest status all data\nmsg.result.newData = {\n    deviceUpdate: msg.result.prefiousData.deviceUpdate,\n    sensorData: {},\n    metaData: msg.result.prefiousData.metaData,\n    loraTopic: msg.result.prefiousData.loraTopic\n}\n\n// load sensorData from prefiousData into newData\nfor (let key in msg.result.prefiousData.sensorData) {\n    msg.result.newData.sensorData[key] = msg.result.prefiousData.sensorData[key]\n}\n\n// update newData with last values\nmsg.result.newData.sensorData[msg.result.variable] = msg.result.value\n\nif (msg.result.prefiousData.downlink) {\n    msg.result.newData.downlink = msg.result.prefiousData.downlink\n} else {\n    msg.result.newData.downlink = {\n        [msg.result.variable]: msg.result.prefiousData.sensorData[msg.result.variable],\n    }\n}\nmsg.result.newData.downlink.commandSet = msg.result.commandSet\nmsg.result.newData.downlink.variable = msg.result.variable\nmsg.result.newData.downlink.value = msg.result.value\nmsg.result.newData.downlink.timestamp = msg.result.timestamp\n\nflow.set('loraPayload_' + msg.result.deviceName, msg.result.newData)\n\nmsg.sensorData = {}\nfor (let key in msg.result.newData.sensorData) {\n    if (typeof (msg.result.newData.sensorData[key]) !== 'object') {\n        msg.sensorData[key] = msg.result.newData.sensorData[key]\n    }\n}\n\nmsg.metaData = {}\nfor (let key in msg.result.newData.metaData) {\n    if (typeof (msg.result.newData.metaData[key]) !== 'object') {\n        msg.metaData[key] = msg.result.newData.metaData[key]\n    }\n}\n\nvar msgDeviceData = {\n    settings: msg.settings,\n    result: msg.result,\n    sensorData: msg.sensorData,\n    metaData: msg.metaData,\n    downlink: msg.result.newData.downlink,\n    timestamp: msg.result.timestamp,\n}\n\nreturn [msg, msgDeviceData, msgDeviceData];",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 600,
+        "y": 760,
+        "wires": [
+            [
+                "5c2f7e73b4acbd69"
+            ],
+            [
+                "967beb3b650f635b",
+                "2d97f37284085cb4"
+            ],
+            [
+                "989b53d7e5b50516",
+                "02e6c9bd365435cc"
+            ]
+        ],
+        "outputLabels": [
+            "debug",
+            "sensorData update",
+            "lora update"
+        ]
+    },
+    {
+        "id": "5c2f7e73b4acbd69",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 76",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 740,
+        "wires": []
+    },
+    {
+        "id": "967beb3b650f635b",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 78",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 780,
+        "wires": []
+    },
+    {
+        "id": "02e6c9bd365435cc",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 79",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 820,
+        "wires": []
+    },
+    {
+        "id": "5c943d1391bad6ab",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 77",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 860,
+        "wires": []
+    },
+    {
+        "id": "65b350adea1ade0f",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 81",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 900,
+        "wires": []
+    },
+    {
+        "id": "c413a6b88a7bba89",
+        "type": "function",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "Send lora downlink",
+        "func": "\nmsg.result.prefiousData = flow.get('loraPayload_' + msg.result.deviceName) || {}\n\nif (msg.result.prefiousData.downlink.timestamp == msg.result.timestamp) {\n    if (msg.result.value != msg.result.prefiousData.downlink[msg.result.variable]) {\n        var msgLora = {\n            topic: msg.result.newData.loraTopic + '/down/push',\n            payload: {\n                downlinks: [\n                    {\n                        f_port: 1,\n                        decoded_payload: {[msg.result.commandSet]: msg.result.value},\n                        priority: \"NORMAL\",\n                        confirmed: false\n                    }\n                ]\n            }\n        }\n        node.send([msg, msgLora])\n        msg.exit = 'lora message send'\n    } else {\n        msg.exit = 'targetTemperature the same'\n    }\n    msg.result.newData = {}\n    for (let key in msg.result.prefiousData) {\n        if(key != 'downlink') {\n            msg.result.newData[key] = msg.result.prefiousData[key]\n        }\n    }\n    \n    flow.set('loraPayload_' + msg.result.deviceName, msg.result.newData)\n} else {\n    msg.exit = 'timestamp different'\n}\n\nreturn [msg, null];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 990,
+        "y": 860,
+        "wires": [
+            [
+                "5c943d1391bad6ab"
+            ],
+            [
+                "65b350adea1ade0f",
+                "ac23c770cd87dcbe"
+            ]
+        ],
+        "outputLabels": [
+            "debug",
+            "mqtt2lora"
+        ]
+    },
+    {
+        "id": "ac23c770cd87dcbe",
+        "type": "mqtt out",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "TTN ha-thermostaat",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "84e0b16.466435",
+        "x": 1320,
+        "y": 1020,
+        "wires": []
+    },
+    {
+        "id": "989b53d7e5b50516",
+        "type": "delay",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "delay 5s",
+        "pauseType": "delayv",
+        "timeout": "5",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 520,
+        "y": 860,
+        "wires": [
+            [
+                "c413a6b88a7bba89"
+            ]
+        ]
+    },
+    {
+        "id": "1cbc0901a01a5bdb",
+        "type": "inject",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 250,
+        "y": 140,
+        "wires": [
+            [
+                "12a689831b07466d"
+            ]
+        ]
+    },
+    {
+        "id": "12a689831b07466d",
+        "type": "function",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "\"vicki_settings\" to flow variable",
+        "func": "// general settings\n// topic names which could be different per Lora server\nmsg.settings = {\n    manufacturer: 'MClimate',\n    model: 'Vicki - LoRaWAN Smart Radiator Thermostat',\n    topicHomeassistantDeviceStatus: 'lora2nodered2mqtt',\n    topicHomeassistant: 'homeassistant',\n    topicsLora: {\n        deviceName: 'end_device_ids/device_id',             // TTN & TTI\n        sensorData: 'uplink_message/decoded_payload',       // TTN & TTI\n        gatewayData: 'uplink_message/rx_metadata'           // TTN & TTI\n    },\n//    deviceUpdateWindow: 1400,      // in minutes to update device in HA\n//    deviceUpdateWindow: 10,      // in minutes\n    deviceUpdateWindow: 1,      // in minutes\n    batteryFull: 1.7 * 2,\n\tbatteryLow: 1.3 * 2\n}\n\nflow.set('vicki_settings', msg.settings)\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 590,
+        "y": 140,
+        "wires": [
+            [
+                "abdc88dbe21bd760"
+            ]
+        ]
+    },
+    {
+        "id": "abdc88dbe21bd760",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 87",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "b47fac0e411bde12",
+        "type": "function",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "manual request Vicki version and temperature range",
+        "func": "// one or more deviceNames where the software and temperature range needs to be requested\n//msg.deviceNameList = ['device_1', 'device_2', 'device_X']     \n\nmsg.deviceNameList = ['eui-70b3d52dd3015cd5', 'eui-70b3d52dd3015c93']\n\nfor (let i in msg.deviceNameList) {\n    let deviceName = msg.deviceNameList[i]\n    var msgLora = {\n        topic: 'v3/ha-thermostaat@ttn/devices/' + deviceName + '/down/push',\n        payload: {\n            downlinks: [\n                {\n                    f_port: 1,\n//                    decoded_payload: { getDeviceVersions: '', getTemperatureRange: '' },\n                    decoded_payload: { getDeviceVersions: '', getAllParams: '' },\n                    priority: \"NORMAL\",\n                    confirmed: false\n                }\n            ]\n        }\n    }\n    node.send([null, msgLora]);\n}\n\nreturn [msg, null];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 660,
+        "y": 1120,
+        "wires": [
+            [
+                "4eab435e498049da"
+            ],
+            [
+                "378b8d22db75c001",
+                "ac23c770cd87dcbe"
+            ]
+        ],
+        "outputLabels": [
+            "debug",
+            "mqtt2lora"
+        ]
+    },
+    {
+        "id": "4eab435e498049da",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 88",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 1100,
+        "wires": []
+    },
+    {
+        "id": "2cdd4dbd3ee72448",
+        "type": "inject",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 240,
+        "y": 1120,
+        "wires": [
+            [
+                "b47fac0e411bde12"
+            ]
+        ]
+    },
+    {
+        "id": "378b8d22db75c001",
+        "type": "debug",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "debug 89",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1280,
+        "y": 1140,
+        "wires": []
+    },
+    {
+        "id": "8f532cb98a569317",
+        "type": "comment",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "Don't use it to often because there is a limit/fair-use-policy for downlink messages with public Lora servers",
+        "info": "Also uplinks should no bet set more frequently then every 4 minutes, better to use 10 or 15 minutes",
+        "x": 520,
+        "y": 1080,
+        "wires": []
+    },
+    {
+        "id": "b2eddbc63f783015",
+        "type": "comment",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "TTN mqtt",
+        "info": "",
+        "x": 220,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "756bf830d251a323",
+        "type": "comment",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "TTN mqtt",
+        "info": "",
+        "x": 1280,
+        "y": 980,
+        "wires": []
+    },
+    {
+        "id": "f84938f7173f097c",
+        "type": "comment",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "local mqtt",
+        "info": "",
+        "x": 1280,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "8dbab41c935b0477",
+        "type": "comment",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "local mqtt",
+        "info": "",
+        "x": 220,
+        "y": 720,
+        "wires": []
+    },
+    {
+        "id": "2d97f37284085cb4",
+        "type": "delay",
+        "z": "ec12d4fa86b9e679",
+        "g": "487d42b63856018f",
+        "name": "",
+        "pauseType": "delay",
+        "timeout": "1",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 820,
+        "y": 660,
+        "wires": [
+            [
+                "e338b080ceb54d0a"
+            ]
+        ]
+    },
+    {
+        "id": "84e0b16.466435",
+        "type": "mqtt-broker",
+        "name": "TTN ha-thermostaat",
+        "broker": "eu1.cloud.thethings.network",
+        "port": "1883",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "compatmode": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "e0a907a349b19b14",
+        "type": "mqtt-broker",
+        "name": "snoek923/mosquittoDev",
+        "broker": "snoek923.noork.nl",
+        "port": "6043",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    }
+]
