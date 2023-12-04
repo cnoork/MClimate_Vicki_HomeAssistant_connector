@@ -21,7 +21,7 @@ Available properties for automation:
 
 ![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/978a7f0b-72a0-494a-a759-2f87e1e2a51f)
 
-For connection with mqtt frm TTN you can use "mqtts://eu1.cloud.thethings.network" or "mqtt://eu1.cloud.thethings.network" as address and for user "\<your application name\>@ttn" and the password is a generated API key from TTN.
+For connection with mqtt from TTN you can use "mqtts://eu1.cloud.thethings.network" or "mqtt://eu1.cloud.thethings.network" as address and for user "\<your application name\>@ttn" and the password is a generated API key from TTN.
 
 ![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/d11eefb5-414a-40cb-b67c-4cd35b47f823)
 
