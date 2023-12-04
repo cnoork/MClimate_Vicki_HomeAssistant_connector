@@ -13,7 +13,7 @@ When creating this solution there was not yet an encoder for downlinks available
 
 ![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/0595ca10-368e-4bcf-9063-79ce06c05fd7)
 
-Dashboard exapmle:
+Dashboard example:
 
 ![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/68a6389c-9fd1-458f-aea6-843529e8c4ca)
 
