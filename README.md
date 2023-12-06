@@ -15,7 +15,7 @@ When creating this solution there was not yet an encoder for downlinks available
 
 Dashboard example:
 
-![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/68a6389c-9fd1-458f-aea6-843529e8c4ca)
+![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/3f6d252a-4bb0-4df0-a989-81d547dc5db9)
 
 Available properties for automation:
 
@@ -23,6 +23,6 @@ Available properties for automation:
 
 For connection with mqtt from TTN you can use "mqtts://eu1.cloud.thethings.network" or "mqtt://eu1.cloud.thethings.network" as address and for user "\<your application name\>@ttn" and the password is a generated API key from TTN.
 
-![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/d11eefb5-414a-40cb-b67c-4cd35b47f823)
+![image](https://github.com/cnoork/MClimate_Vicki_HomeAssistant_connector/assets/17862084/7fc2fea2-6539-4258-b6d3-11fd8342ca55)
 
 All functions with multiple outputs is the first one for debug with all input and output info.
